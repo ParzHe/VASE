@@ -1,6 +1,6 @@
 """Implement semantic entropy."""
 import os
-import pickle
+# import pickle
 import logging
 
 import numpy as np
@@ -10,9 +10,9 @@ import torch.nn.functional as F
 
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-from SeEntLib.uncertainty.models.huggingface_models import HuggingfaceModel
-from SeEntLib.uncertainty.utils import openai as oai
-from SeEntLib.uncertainty.utils import utils
+# from SeEntLib.uncertainty.models.huggingface_models import HuggingfaceModel
+# from SeEntLib.uncertainty.utils import openai as oai
+# from SeEntLib.uncertainty.utils import utils
 
 
 # DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -24,7 +24,7 @@ class BaseEntailment:
 
 
 class EntailmentDeberta(BaseEntailment):
-    def __init__(self, device='cuda'):
+    def __init__(self, device: 'str | torch.device' = 'cuda'):
         self.device = device
         self.tokenizer = AutoTokenizer.from_pretrained("microsoft/deberta-v2-xlarge-mnli")
         self.model = AutoModelForSequenceClassification.from_pretrained(
