@@ -1,4 +1,5 @@
 import csv
+import os
 import torch
 from tqdm import tqdm
 import torch.nn.functional as F
@@ -34,9 +35,17 @@ class AddPoissonNoise:
 def get_sequence_log_logits(token_ids, scores, special_token_ids):
     # token_ids: torch.Size([no_samples, num_gen_tokens]); 
     # scores: torch.Size([no_samples, num_gen_tokens, num_vocab])
-    log_logits = torch.log(F.softmax(scores, dim=-1))
-    selected_log_logits = torch.gather(log_logits, 2, token_ids.unsqueeze(-1)).squeeze(-1)
-    mask = ~torch.isin(token_ids, special_token_ids)
+    # Keep sequence lengths aligned and clamp ids to avoid CUDA gather OOB.
+    seq_len = min(token_ids.size(1), scores.size(1))
+    token_ids = token_ids[:, :seq_len]
+    scores = scores[:, :seq_len, :]
+
+    log_logits = F.log_softmax(scores, dim=-1)
+    special_token_ids = special_token_ids.to(token_ids.device)
+    valid_vocab_mask = (token_ids >= 0) & (token_ids < log_logits.size(-1))
+    safe_token_ids = token_ids.clamp(min=0, max=log_logits.size(-1) - 1)
+    selected_log_logits = torch.gather(log_logits, 2, safe_token_ids.unsqueeze(-1)).squeeze(-1)
+    mask = (~torch.isin(token_ids, special_token_ids)) & valid_vocab_mask
     filtered_log_logits = [logits[row_mask].cpu() for logits, row_mask in zip(selected_log_logits, mask)]
     return filtered_log_logits
 
@@ -62,13 +71,15 @@ def main_pred_hallscore(csv_file='outputs/radvqa_medgemma_hallscore.csv'):
     device0 = torch.device("cuda:0")  # GPU for medgemma
     device1 = torch.device("cuda:1")  # GPU for entailment model
 
+    # if no output directory, create one
+    if not os.path.exists('outputs'):
+        os.makedirs('outputs')
+
     # load model
     model_id = "google/medgemma-4b-it" 
-    model = AutoModelForImageTextToText.from_pretrained(model_id, token='your_huggingface_token', torch_dtype=torch.bfloat16, device_map=device0)
-    processor = AutoProcessor.from_pretrained(model_id, token='your_huggingface_token', use_fast=False)
-    # add special tokens
-    new_special_tokens = {"additional_special_tokens": ["\n", "<end_of_turn>"]}
-    processor.tokenizer.add_special_tokens(new_special_tokens)
+    hf_token = os.getenv("HF_TOKEN")
+    model = AutoModelForImageTextToText.from_pretrained(model_id, token=hf_token, dtype=torch.bfloat16, device_map=device0).eval()
+    processor = AutoProcessor.from_pretrained(model_id, token=hf_token, backend="pil")
 
     # load dataset (open-ended VQA test samples)
     test_set = load_dataset("flaviagiammarino/vqa-rad", split="test").filter(lambda x: x["answer"].lower() != "yes" and x["answer"].lower() != "no")
@@ -126,7 +137,8 @@ def main_pred_hallscore(csv_file='outputs/radvqa_medgemma_hallscore.csv'):
             
             inputs['input_ids'] = inputs['input_ids'].repeat(num_samples, 1)
             inputs['attention_mask'] = inputs['attention_mask'].repeat(num_samples, 1)
-            inputs['token_type_ids'] = inputs['token_type_ids'].repeat(num_samples, 1)
+            if 'token_type_ids' in inputs:
+                inputs['token_type_ids'] = inputs['token_type_ids'].repeat(num_samples, 1)
             inputs['pixel_values'] = inputs['pixel_values'].repeat(num_samples, 1, 1, 1)
             outputs = run_one_pass(inputs) 
             token_ids, scores = outputs.sequences[:,input_len:], outputs.scores
@@ -145,8 +157,9 @@ def main_pred_hallscore(csv_file='outputs/radvqa_medgemma_hallscore.csv'):
                 return noisy_inputs
 
             noisy_inputs = make_noisy_inputs(image_input, prompt)
-            noisy_outputs = run_one_pass(noisy_inputs) 
-            token_ids_noisy, scores_noisy = noisy_outputs.sequences[:,input_len:], noisy_outputs.scores
+            noisy_outputs = run_one_pass(noisy_inputs)
+            noisy_input_len = noisy_inputs["input_ids"].shape[-1]
+            token_ids_noisy, scores_noisy = noisy_outputs.sequences[:, noisy_input_len:], noisy_outputs.scores
             sam_answers_noisy = processor.tokenizer.batch_decode(token_ids_noisy, skip_special_tokens=True)
 
             temp_gen_answer = question + ' ' + gen_answer
