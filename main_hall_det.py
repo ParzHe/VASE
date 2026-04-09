@@ -1,3 +1,4 @@
+import argparse
 import csv
 import math
 import os
@@ -10,7 +11,12 @@ from torchvision import transforms
 from SeEntLib.uncertainty.uncertainty_measures.semantic_entropy import EntailmentDeberta, get_semantic_ids
 from SeEntLib.demo import get_sentence_semantic_entropy_w_semantic_ids
 
-from transformers import AutoProcessor, AutoModelForImageTextToText
+from transformers import AutoProcessor, AutoModelForCausalLM
+
+try:
+    from transformers import AutoModelForImageTextToText
+except ImportError:
+    AutoModelForImageTextToText = None
 
 
 class AddGaussianNoise:
@@ -111,7 +117,44 @@ def get_messages(prompt, image_input):
     return messages
 
 
-def main_pred_hallscore(csv_file='outputs/radvqa_medgemma_hallscore.csv'):
+def load_vlm_model_and_processor(model_id, hf_token, device0):
+    common_kwargs = {
+        "token": hf_token,
+        "torch_dtype": torch.bfloat16,
+        "device_map": device0,
+    }
+
+    if AutoModelForImageTextToText is not None:
+        try:
+            model = AutoModelForImageTextToText.from_pretrained(model_id, **common_kwargs).eval()
+            processor = AutoProcessor.from_pretrained(model_id, token=hf_token, backend="pil")
+            return model, processor
+        except ValueError as exc:
+            # llava-med-v1.5-mistral-7b ships model_type=llava_mistral (transformers 4.36 era).
+            # Newer auto mappings can miss this key, so fallback to causal-lm path.
+            if "llava_mistral" not in str(exc):
+                raise
+
+    try:
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id,
+            trust_remote_code=True,
+            **common_kwargs,
+        ).eval()
+        processor = AutoProcessor.from_pretrained(model_id, token=hf_token, trust_remote_code=True, backend="pil")
+        return model, processor
+    except ValueError as exc:
+        # llava-med-v1.5-mistral-7b ships model_type=llava_mistral (transformers 4.36 era).
+        # Keep an actionable error if caller uses an incompatible environment.
+        if "llava_mistral" not in str(exc):
+            raise
+        raise RuntimeError(
+            "Model type llava_mistral is not supported in this transformers build. "
+            "Use the pixi environment/task pinned for llava (vase-llava)."
+        ) from exc
+
+
+def main_pred_hallscore(modelid="google/medgemma-4b-it", csv_file='outputs/radvqa_medgemma_hallscore.csv'):
     device0 = torch.device("cuda:0")  # GPU for medgemma
     device1 = torch.device("cuda:1")  # GPU for entailment model
 
@@ -120,10 +163,9 @@ def main_pred_hallscore(csv_file='outputs/radvqa_medgemma_hallscore.csv'):
         os.makedirs('outputs')
 
     # load model
-    model_id = "google/medgemma-4b-it" 
+    model_id = modelid # "microsoft/llava-med-v1.5-mistral-7b" "google/medgemma-4b-it" 
     hf_token = os.getenv("HF_TOKEN")
-    model = AutoModelForImageTextToText.from_pretrained(model_id, token=hf_token, dtype=torch.bfloat16, device_map=device0).eval()
-    processor = AutoProcessor.from_pretrained(model_id, token=hf_token, backend="pil")
+    model, processor = load_vlm_model_and_processor(model_id, hf_token, device0)
 
     # load dataset (open-ended VQA test samples)
     test_set = load_dataset("flaviagiammarino/vqa-rad", split="test").filter(lambda x: x["answer"].lower() != "yes" and x["answer"].lower() != "no")
@@ -258,6 +300,22 @@ def main_pred_hallscore(csv_file='outputs/radvqa_medgemma_hallscore.csv'):
             torch.cuda.ipc_collect()
 
         
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--model-id",
+        default=os.getenv("VASE_MODEL_ID", "google/medgemma-4b-it"),
+        help="Model id to run for hallucinaton detection",
+    )
+    parser.add_argument(
+        "--csv-file",
+        default=os.getenv("VASE_OUTPUT_CSV", "outputs/radvqa_medgemma_hallscore.csv"),
+        help="Output csv file path",
+    )
+    return parser.parse_args()
+
+
 # python main_hall_det.py
 if __name__ == '__main__':
-    main_pred_hallscore()
+    args = parse_args()
+    main_pred_hallscore(args.model_id, args.csv_file)
