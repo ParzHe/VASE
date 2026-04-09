@@ -1,4 +1,5 @@
 import os
+import argparse
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import pandas as pd
 from green_score import GREEN
@@ -23,10 +24,17 @@ def eval_t2t_csv(in_csv_file, out_csv_file):
 
     out_df.to_csv(out_csv_file, index=False)
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Evaluate GREEN scores for generated answers.")
+    parser.add_argument("--input_csv", type=str, default="outputs/radvqa_medgemma_hallscore.csv",
+                        help="Path to the input CSV file containing questions, reference answers, and generated answers.")
+    parser.add_argument("--output_csv", type=str, default="outputs/radvqa_medgemma_green.csv",
+                        help="Path to the output CSV file where GREEN scores will be saved.")
+    return parser.parse_args()
+
 # conda activate env_green (!!! Set up a dedicated virtual environment for the Green model to prevent conflicts with environments used for other MLLMs.)
 # CUDA_VISIBLE_DEVICES=0 torchrun --nproc_per_node=1 green_eval.py
 # deactivate
 if __name__ == "__main__":
-    in_csv_file = "outputs/radvqa_medgemma_hallscore.csv"
-    out_csv_file = "outputs/radvqa_medgemma_green.csv"
-    eval_t2t_csv(in_csv_file, out_csv_file)
+    args = parse_args()
+    eval_t2t_csv(args.input_csv, args.output_csv)

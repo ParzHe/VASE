@@ -1,3 +1,4 @@
+import argparse
 import torch
 import numpy as np
 import sklearn.metrics as metrics
@@ -101,8 +102,23 @@ def main(
     print('AUC:', auc, '%', 'AUG:', aug, '%')
     return auc, aug
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Evaluate hallucination detection performance using AUC and AUG.")
+    parser.add_argument("--csv_hall_label", default="outputs/radvqa_medgemma_green.csv")
+    parser.add_argument("--column_hall_label", default="green_score")
+    parser.add_argument("--csv_hall_score", default="outputs/radvqa_medgemma_hallscore.csv")
+    parser.add_argument("--column_hall_score", default="SE", help="Column name for hallucination scores (e.g., SE, VASE, RadFlag).")
+    parser.add_argument("--uncertainty_flag", action="store_true")
+    return parser.parse_args()
 
 # python hall_det_eval.py
 if __name__ == "__main__":
-    main() 
+    args = parse_args()
+    main(
+        csv_hall_label=args.csv_hall_label,
+        column_hall_label=args.column_hall_label,
+        csv_hall_score=args.csv_hall_score,
+        column_hall_score=args.column_hall_score,
+        uncertainty_flag=args.uncertainty_flag
+    )
     
