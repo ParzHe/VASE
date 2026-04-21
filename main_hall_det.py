@@ -145,6 +145,7 @@ def load_vlm_model_and_processor(model_id, hf_token, device0):
         model = AutoModelForCausalLM.from_pretrained(
             model_id, trust_remote_code=True, **common_kwargs,
         ).eval()
+        model = model.to(torch.float16)
         processor = AutoProcessor.from_pretrained(model_id, token=hf_token, trust_remote_code=True)
         try:
             model.generation_config = GenerationConfig.from_pretrained(model_id, token=hf_token)
