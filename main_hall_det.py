@@ -11,12 +11,16 @@ from torchvision import transforms
 from SeEntLib.uncertainty.uncertainty_measures.semantic_entropy import EntailmentDeberta, get_semantic_ids
 from SeEntLib.demo import get_sentence_semantic_entropy_w_semantic_ids
 
-from transformers import AutoProcessor, AutoModelForCausalLM
+from transformers import AutoProcessor, AutoModelForCausalLM, GenerationConfig
 
 try:
     from transformers import AutoModelForImageTextToText
 except ImportError:
     AutoModelForImageTextToText = None
+
+
+def is_chexagent(model_id):
+    return "chexagent" in model_id.lower()
 
 
 class AddGaussianNoise:
@@ -104,7 +108,7 @@ def get_messages(prompt, image_input):
     messages = [
                 {
                     "role": "system",
-                    "content": [{"type": "text", "text": "You are a medical image analysis expert."}] 
+                    "content": [{"type": "text", "text": "You are a medical image analysis expert."}]
                 },
                 {
                     "role": "user",
@@ -117,12 +121,36 @@ def get_messages(prompt, image_input):
     return messages
 
 
+def build_inputs(processor, model, prompt, image_input, model_dtype, model_id):
+    if is_chexagent(model_id):
+        text = f" USER: <s>{prompt} ASSISTANT: <s>"
+        inputs = processor(images=[image_input], text=text, return_tensors="pt").to(model.device, dtype=model_dtype)
+        return inputs
+    messages = get_messages(prompt, image_input)
+    return processor.apply_chat_template(
+        messages, add_generation_prompt=True, tokenize=True,
+        return_dict=True, return_tensors="pt",
+    ).to(model.device, dtype=model_dtype)
+
+
 def load_vlm_model_and_processor(model_id, hf_token, device0):
     common_kwargs = {
         "token": hf_token,
         "torch_dtype": torch.bfloat16,
         "device_map": device0,
     }
+
+    if is_chexagent(model_id):
+        common_kwargs["torch_dtype"] = torch.float16
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id, trust_remote_code=True, **common_kwargs,
+        ).eval()
+        processor = AutoProcessor.from_pretrained(model_id, token=hf_token, trust_remote_code=True)
+        try:
+            model.generation_config = GenerationConfig.from_pretrained(model_id, token=hf_token)
+        except Exception:
+            pass
+        return model, processor
 
     if AutoModelForImageTextToText is not None:
         try:
@@ -166,6 +194,7 @@ def main_pred_hallscore(modelid="google/medgemma-4b-it", csv_file='outputs/radvq
     model_id = modelid # "microsoft/llava-med-v1.5-mistral-7b" "google/medgemma-4b-it" 
     hf_token = os.getenv("HF_TOKEN")
     model, processor = load_vlm_model_and_processor(model_id, hf_token, device0)
+    model_dtype = torch.float16 if is_chexagent(model_id) else torch.bfloat16
 
     # load dataset (open-ended VQA test samples)
     test_set = load_dataset("flaviagiammarino/vqa-rad", split="test").filter(lambda x: x["answer"].lower() != "yes" and x["answer"].lower() != "no")
@@ -201,8 +230,7 @@ def main_pred_hallscore(modelid="google/medgemma-4b-it", csv_file='outputs/radvq
             # generate answer when temperature == 0.1
             image_input = img_trans_ori(image) 
             prompt = 'Answer this question as concisely as possible based on the provide images: ' + question
-            messages = get_messages(prompt, image_input)
-            inputs = processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=True, return_dict=True, return_tensors="pt").to(model.device, dtype=torch.bfloat16)
+            inputs = build_inputs(processor, model, prompt, image_input, model_dtype, model_id)
             input_len = inputs["input_ids"].shape[-1] # input_ids, attention_mask, token_type_ids, pixel_values
             with torch.inference_mode():
                 outputs = model.generate(**inputs, 
@@ -225,7 +253,8 @@ def main_pred_hallscore(modelid="google/medgemma-4b-it", csv_file='outputs/radvq
             inputs['attention_mask'] = inputs['attention_mask'].repeat(num_samples, 1)
             if 'token_type_ids' in inputs:
                 inputs['token_type_ids'] = inputs['token_type_ids'].repeat(num_samples, 1)
-            inputs['pixel_values'] = inputs['pixel_values'].repeat(num_samples, 1, 1, 1)
+            pv = inputs['pixel_values']
+            inputs['pixel_values'] = pv.repeat(num_samples, *([1] * (pv.ndim - 1)))
             outputs = run_one_pass(inputs) 
             token_ids, scores = outputs.sequences[:,input_len:], outputs.scores
             sam_answers = processor.tokenizer.batch_decode(token_ids, skip_special_tokens=True)
@@ -235,8 +264,7 @@ def main_pred_hallscore(modelid="google/medgemma-4b-it", csv_file='outputs/radvq
 
                 for _ in range(num_samples):
                     noisy_image_input = img_trans_noi(image_input)
-                    noi_messages = get_messages(prompt, noisy_image_input)
-                    noisy_inputs = processor.apply_chat_template(noi_messages, add_generation_prompt=True, tokenize=True, return_dict=True, return_tensors="pt").to(model.device, dtype=torch.bfloat16)
+                    noisy_inputs = build_inputs(processor, model, prompt, noisy_image_input, model_dtype, model_id)
                     noisy_inputs_list.append(noisy_inputs)
 
                 noisy_inputs = {key: torch.cat([ni[key] for ni in noisy_inputs_list], dim=0) for key in noisy_inputs_list[0]}
