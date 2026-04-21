@@ -18,12 +18,12 @@ def main():
     )
     parser.add_argument(
         "--score_csv",
-        default="outputs/radvqa_medgemma_hallscore.csv",
+        default="outputs/radvqa_medgemma_univrse_hallscore.csv",
         help="CSV produced by VASE/main_univrse_det.py.",
     )
     parser.add_argument(
         "--label_csv",
-        default="outputs/radvqa_medgemma_green.csv",
+        default="outputs/radvqa_medgemma_univrse_green.csv",
         help="CSV produced by VASE/green_eval.py on the score_csv above.",
     )
     parser.add_argument(
