@@ -108,17 +108,27 @@ def parse_args():
     parser.add_argument("--column_hall_label", default="green_score")
     parser.add_argument("--csv_hall_score", default="outputs/radvqa_medgemma_hallscore.csv")
     parser.add_argument("--column_hall_score", default="SE", help="Column name for hallucination scores (e.g., SE, VASE, RadFlag).")
-    parser.add_argument("--uncertainty_flag", action="store_true")
+    parser.add_argument(
+        "--uncertainty_flag",
+        default=True,
+        action=argparse.BooleanOptionalAction,
+        help="Whether hall score indicates uncertainty. Use --no-uncertainty_flag for confidence scores like RadFlag.",
+    )
     return parser.parse_args()
 
 # python hall_det_eval.py
 if __name__ == "__main__":
     args = parse_args()
+    uncertainty_flag = args.uncertainty_flag
+    if args.column_hall_score.strip().lower() == "radflag" and uncertainty_flag:
+        print("[hall_det_eval] column_hall_score=RadFlag detected; overriding uncertainty_flag=False.")
+        uncertainty_flag = False
+
     main(
         csv_hall_label=args.csv_hall_label,
         column_hall_label=args.column_hall_label,
         csv_hall_score=args.csv_hall_score,
         column_hall_score=args.column_hall_score,
-        uncertainty_flag=args.uncertainty_flag
+        uncertainty_flag=uncertainty_flag
     )
     
