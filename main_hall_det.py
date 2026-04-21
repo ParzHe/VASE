@@ -232,7 +232,8 @@ def main_pred_hallscore(modelid="google/medgemma-4b-it", csv_file='outputs/radvq
             image_input = img_trans_ori(image) 
             prompt = 'Answer this question as concisely as possible based on the provide images: ' + question
             inputs = build_inputs(processor, model, prompt, image_input, model_dtype, model_id)
-            input_len = inputs["input_ids"].shape[-1] # input_ids, attention_mask, token_type_ids, pixel_values
+            # CheXagent feeds inputs_embeds to its inner LM, so generate() returns ONLY new tokens.
+            input_len = 0 if is_chexagent(model_id) else inputs["input_ids"].shape[-1]
             with torch.inference_mode():
                 outputs = model.generate(**inputs, 
                                          max_new_tokens=200, do_sample=True, temperature=0.1, top_p=0.9, num_beams=1, use_cache=True, pad_token_id=processor.tokenizer.eos_token_id, 
@@ -273,7 +274,7 @@ def main_pred_hallscore(modelid="google/medgemma-4b-it", csv_file='outputs/radvq
 
             noisy_inputs = make_noisy_inputs(image_input, prompt)
             noisy_outputs = run_one_pass(noisy_inputs)
-            noisy_input_len = noisy_inputs["input_ids"].shape[-1]
+            noisy_input_len = 0 if is_chexagent(model_id) else noisy_inputs["input_ids"].shape[-1]
             token_ids_noisy, scores_noisy = noisy_outputs.sequences[:, noisy_input_len:], noisy_outputs.scores
             sam_answers_noisy = processor.tokenizer.batch_decode(token_ids_noisy, skip_special_tokens=True)
 
