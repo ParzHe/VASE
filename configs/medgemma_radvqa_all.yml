@@ -1,0 +1,6 @@
+name: medgemma_radvqa_all
+model_id: google/medgemma-4b-it
+dataset: flaviagiammarino/vqa-rad
+question_set: all
+hallscore_csv: outputs/medgemma_radvqa_all_hallscore.csv
+green_csv: outputs/medgemma_radvqa_all_green.csv

@@ -1,0 +1,6 @@
+name: llava_radvqa_all
+model_id: chaoyinshe/llava-med-v1.5-mistral-7b-hf
+dataset: flaviagiammarino/vqa-rad
+question_set: all
+hallscore_csv: outputs/llava_radvqa_all_hallscore.csv
+green_csv: outputs/llava_radvqa_all_green.csv

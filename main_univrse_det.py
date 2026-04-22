@@ -17,6 +17,7 @@ from main_hall_det import (
     is_chexagent, load_vlm_model_and_processor,
     safe_float, safe_prob_dist,
 )
+from exp_config import peek_config
 
 
 LAMBDA = 1.0  # visual amplification coefficient (UniVRSE paper §V-C; equals VASE alpha)
@@ -42,7 +43,9 @@ def entropy_from_logits_contrast(p_main, p_contrast, lam=LAMBDA):
 
 def main_pred_hallscore(modelid="google/medgemma-4b-it",
                         csv_file="outputs/radvqa_univrse_hallscore.csv",
-                        limit=None):
+                        limit=None,
+                        dataset="flaviagiammarino/vqa-rad",
+                        question_set="open-ended"):
     device0 = torch.device("cuda:0")
     device1 = torch.device("cuda:1")
 
@@ -53,9 +56,13 @@ def main_pred_hallscore(modelid="google/medgemma-4b-it",
     model, processor = load_vlm_model_and_processor(model_id, hf_token, device0)
     model_dtype = torch.float16 if is_chexagent(model_id) else torch.bfloat16
 
-    test_set = load_dataset("flaviagiammarino/vqa-rad", split="test").filter(
-        lambda x: x["answer"].lower() != "yes" and x["answer"].lower() != "no"
-    )
+    # # load dataset
+    test_set = load_dataset(dataset, split="test")
+    if question_set == "open-ended":
+        # VASE paper §3.1: exclude binary yes/no to get the open-ended subset.
+        test_set = test_set.filter(
+            lambda x: x["answer"].lower() != "yes" and x["answer"].lower() != "no"
+        )
 
     num_samples = 10
     entailment_model = EntailmentDeberta(device=device1)
@@ -273,20 +280,39 @@ def main_pred_hallscore(modelid="google/medgemma-4b-it",
 
 
 def parse_args():
+    cfg = peek_config()
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "--config",
+        default=cfg.get("__config_path__"),
+        help="Path to a YAML experiment config (see configs/). CLI flags override config values.",
+    )
+    parser.add_argument(
         "--model-id",
-        default=os.getenv("UNIVRSE_MODEL_ID", "google/medgemma-4b-it"),
-        help="VLM id (e.g. google/medgemma-4b-it or chaoyinshe/llava-med-v1.5-mistral-7b-hff).",
+        default=cfg.get("model_id", os.getenv("UNIVRSE_MODEL_ID", "google/medgemma-4b-it")),
+        help="VLM id (e.g. google/medgemma-4b-it or chaoyinshe/llava-med-v1.5-mistral-7b-hf).",
     )
     parser.add_argument(
         "--csv-file",
-        default=os.getenv("UNIVRSE_OUTPUT_CSV", "outputs/radvqa_medgemma_hallscore.csv"),
+        default=cfg.get("hallscore_csv",
+                        os.getenv("UNIVRSE_OUTPUT_CSV", "outputs/radvqa_medgemma_hallscore.csv")),
         help="Output CSV with SE/VASE/RadFlag/UniVRSE scores.",
     )
     parser.add_argument(
         "--limit", type=int, default=None,
-        help="Optional debug cap on number of VQA-RAD samples.",
+        help="Optional debug cap on number of test samples.",
+    )
+    parser.add_argument(
+        "--dataset",
+        default=cfg.get("dataset", os.getenv("UNIVRSE_DATASET", "flaviagiammarino/vqa-rad")),
+        choices=["flaviagiammarino/vqa-rad", "flaviagiammarino/path-vqa"],
+        help="HF dataset id; the 'test' split is used.",
+    )
+    parser.add_argument(
+        "--question-set",
+        default=cfg.get("question_set", os.getenv("UNIVRSE_QUESTION_SET", "open-ended")),
+        choices=["open-ended", "all"],
+        help="VASE paper evaluates both open-ended (no yes/no) and all questions.",
     )
     return parser.parse_args()
 
@@ -294,4 +320,5 @@ def parse_args():
 # python VASE/main_univrse_det.py
 if __name__ == '__main__':
     args = parse_args()
-    main_pred_hallscore(args.model_id, args.csv_file, limit=args.limit)
+    main_pred_hallscore(args.model_id, args.csv_file, limit=args.limit,
+                        dataset=args.dataset, question_set=args.question_set)

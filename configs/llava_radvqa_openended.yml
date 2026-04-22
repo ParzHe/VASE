@@ -1,0 +1,6 @@
+name: llava_radvqa_openended
+model_id: chaoyinshe/llava-med-v1.5-mistral-7b-hf
+dataset: flaviagiammarino/vqa-rad
+question_set: open-ended
+hallscore_csv: outputs/llava_radvqa_openended_hallscore.csv
+green_csv: outputs/llava_radvqa_openended_green.csv

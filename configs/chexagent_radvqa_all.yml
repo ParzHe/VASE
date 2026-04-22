@@ -1,0 +1,6 @@
+name: chexagent_radvqa_all
+model_id: StanfordAIMI/CheXagent-8b
+dataset: flaviagiammarino/vqa-rad
+question_set: all
+hallscore_csv: outputs/chexagent_radvqa_all_hallscore.csv
+green_csv: outputs/chexagent_radvqa_all_green.csv

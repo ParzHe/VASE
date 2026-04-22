@@ -10,6 +10,7 @@ from torchvision import transforms
 
 from SeEntLib.uncertainty.uncertainty_measures.semantic_entropy import EntailmentDeberta, get_semantic_ids
 from SeEntLib.demo import get_sentence_semantic_entropy_w_semantic_ids
+from exp_config import peek_config
 
 from transformers import AutoProcessor, AutoModelForCausalLM, GenerationConfig
 
@@ -183,7 +184,8 @@ def load_vlm_model_and_processor(model_id, hf_token, device0):
         ) from exc
 
 
-def main_pred_hallscore(modelid="google/medgemma-4b-it", csv_file='outputs/radvqa_medgemma_hallscore.csv'):
+def main_pred_hallscore(modelid="google/medgemma-4b-it", csv_file='outputs/radvqa_medgemma_hallscore.csv',
+                        dataset="flaviagiammarino/vqa-rad", question_set="open-ended"):
     device0 = torch.device("cuda:0")  # GPU for medgemma
     device1 = torch.device("cuda:1")  # GPU for entailment model
 
@@ -192,13 +194,17 @@ def main_pred_hallscore(modelid="google/medgemma-4b-it", csv_file='outputs/radvq
         os.makedirs('outputs')
 
     # load model
-    model_id = modelid # "microsoft/llava-med-v1.5-mistral-7b" "google/medgemma-4b-it" 
+    model_id = modelid # "microsoft/llava-med-v1.5-mistral-7b" "google/medgemma-4b-it"
     hf_token = os.getenv("HF_TOKEN")
     model, processor = load_vlm_model_and_processor(model_id, hf_token, device0)
     model_dtype = torch.float16 if is_chexagent(model_id) else torch.bfloat16
 
-    # load dataset (open-ended VQA test samples)
-    test_set = load_dataset("flaviagiammarino/vqa-rad", split="test").filter(lambda x: x["answer"].lower() != "yes" and x["answer"].lower() != "no")
+    # load dataset (VASE paper §3.1: open-ended subset excludes yes/no; 'all' keeps every sample)
+    test_set = load_dataset(dataset, split="test")
+    if question_set == "open-ended":
+        test_set = test_set.filter(lambda x: x["answer"].lower() != "yes" and x["answer"].lower() != "no")
+
+    os.makedirs(os.path.dirname(csv_file) or ".", exist_ok=True)
     
     num_samples = 10
     entailment_model = EntailmentDeberta(device=device1)
@@ -331,16 +337,35 @@ def main_pred_hallscore(modelid="google/medgemma-4b-it", csv_file='outputs/radvq
 
         
 def parse_args():
+    cfg = peek_config()
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "--config",
+        default=cfg.get("__config_path__"),
+        help="Path to a YAML experiment config (see configs/). CLI flags override config values.",
+    )
+    parser.add_argument(
         "--model-id",
-        default=os.getenv("VASE_MODEL_ID", "google/medgemma-4b-it"),
+        default=cfg.get("model_id", os.getenv("VASE_MODEL_ID", "google/medgemma-4b-it")),
         help="Model id to run for hallucinaton detection",
     )
     parser.add_argument(
         "--csv-file",
-        default=os.getenv("VASE_OUTPUT_CSV", "outputs/radvqa_medgemma_hallscore.csv"),
+        default=cfg.get("hallscore_csv",
+                        os.getenv("VASE_OUTPUT_CSV", "outputs/radvqa_medgemma_hallscore.csv")),
         help="Output csv file path",
+    )
+    parser.add_argument(
+        "--dataset",
+        default=cfg.get("dataset", os.getenv("VASE_DATASET", "flaviagiammarino/vqa-rad")),
+        choices=["flaviagiammarino/vqa-rad", "flaviagiammarino/path-vqa"],
+        help="HF dataset id; the 'test' split is used.",
+    )
+    parser.add_argument(
+        "--question-set",
+        default=cfg.get("question_set", os.getenv("VASE_QUESTION_SET", "open-ended")),
+        choices=["open-ended", "all"],
+        help="VASE paper evaluates both open-ended (no yes/no) and all questions.",
     )
     return parser.parse_args()
 
@@ -348,4 +373,5 @@ def parse_args():
 # python main_hall_det.py
 if __name__ == '__main__':
     args = parse_args()
-    main_pred_hallscore(args.model_id, args.csv_file)
+    main_pred_hallscore(args.model_id, args.csv_file,
+                        dataset=args.dataset, question_set=args.question_set)

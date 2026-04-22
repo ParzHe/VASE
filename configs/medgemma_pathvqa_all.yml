@@ -1,0 +1,6 @@
+name: medgemma_pathvqa_all
+model_id: google/medgemma-4b-it
+dataset: flaviagiammarino/path-vqa
+question_set: all
+hallscore_csv: outputs/medgemma_pathvqa_all_hallscore.csv
+green_csv: outputs/medgemma_pathvqa_all_green.csv
